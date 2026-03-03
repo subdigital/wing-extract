@@ -8,13 +8,24 @@ This project is specifically for extracting WAV files from a 32-channel packed W
 
 I haven't had a single successful export using LiveSessions. Hence this utility.
 
-## Build
+## Download
 
-```bash
-cargo build --release
-```
+1. Open this repository's **Releases** page.
+2. Download the archive for your platform:
+- macOS Apple Silicon: `aarch64-apple-darwin`
+- macOS Intel: `x86_64-apple-darwin`
+- Linux x64: `x86_64-unknown-linux-gnu`
+- Windows x64: `x86_64-pc-windows-msvc`
+3. Extract the archive.
+4. Run the binary from a terminal:
+- macOS/Linux: `./wing_extract ...`
+- Windows (PowerShell): `.\\wing_extract.exe ...`
 
 ## Usage
+
+```bash
+wing_extract /Volumes/WING_SD/X_LIVE/5C5C992D --output-dir ./out
+```
 
 Pass either:
 - a directory containing WAV segments (for example `00000001.WAV`, `00000002.WAV`, ...), or
@@ -22,13 +33,13 @@ Pass either:
 
 ```bash
 # Directory mode
-cargo run --release -- /Volumes/WING_SD/X_LIVE/5C5C992D --output-dir ./out
+wing_extract /Volumes/WING_SD/X_LIVE/5C5C992D --output-dir ./out
 
 # Explicit file mode
-cargo run --release -- 00000001.WAV 00000002.WAV 00000003.WAV --output-dir ./out
+wing_extract 00000001.WAV 00000002.WAV 00000003.WAV --output-dir ./out
 
 # Recursive mode (scan subfolders for long recordings split across folders)
-cargo run --release -- /Volumes/WING_SD/X_LIVE --recursive --output-dir ./out
+wing_extract /Volumes/WING_SD/X_LIVE --recursive --output-dir ./out
 ```
 
 Useful options:
@@ -41,6 +52,12 @@ Useful options:
 ```
 
 Output files are named like `Channel-1.wav`, `Channel-2.wav`, etc.
+
+## Build From Source (Optional)
+
+```bash
+cargo build --release
+```
 
 ## License
 

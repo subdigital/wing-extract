@@ -4,6 +4,8 @@ use std::cmp::min;
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -65,6 +67,7 @@ fn main() -> Result<()> {
 }
 
 fn run(args: Args) -> Result<()> {
+    let start = Instant::now();
     let input_files = resolve_inputs(&args.inputs, args.recursive)?;
     ensure!(!input_files.is_empty(), "no WAV files found");
 
@@ -158,11 +161,16 @@ fn run(args: Args) -> Result<()> {
         format,
         bytes_per_sample,
         frames_to_write,
+        start,
     )?;
 
+    eprint!("\r{:<79}\r", "");
+    let _ = std::io::stderr().flush();
+
     println!(
-        "Extracted {} channels ({} frames @ {} Hz, {}-bit) to {}",
+        "Extracted {} channels in {} ({} frames @ {} Hz, {}-bit) to {}",
         format.channels,
+        format_duration(start.elapsed().as_secs()),
         frames_to_write,
         format.sample_rate,
         format.bits_per_sample,
@@ -351,7 +359,9 @@ fn demux_parts(
     format: WavFormat,
     bytes_per_sample: usize,
     mut frames_remaining: u64,
+    start: Instant,
 ) -> Result<()> {
+    let total_frames = frames_remaining;
     let channels = usize::from(format.channels);
     let frame_size = usize::from(format.block_align);
     let frames_per_chunk = 4096usize;
@@ -359,6 +369,7 @@ fn demux_parts(
     let mut channel_bufs = (0..channels)
         .map(|_| Vec::<u8>::with_capacity(frames_per_chunk * bytes_per_sample))
         .collect::<Vec<_>>();
+    let mut frames_done = 0u64;
 
     for part in parts {
         let file = File::open(&part.path)
@@ -402,8 +413,10 @@ fn demux_parts(
                         .context("failed writing output channel data")?;
                 }
 
+                frames_done += allowed_frames as u64;
                 frames_remaining -= allowed_frames as u64;
                 remaining -= to_read as u64;
+                print_progress(frames_done, total_frames, start.elapsed());
             }
             if frames_remaining == 0 {
                 break;
@@ -453,6 +466,57 @@ fn write_wav_header(
 
 fn bytes_per_sample(bits_per_sample: u16) -> usize {
     bits_per_sample.div_ceil(8) as usize
+}
+
+fn print_progress(done: u64, total: u64, elapsed: std::time::Duration) {
+    static LAST_PRINT_MS: AtomicU64 = AtomicU64::new(0);
+    let now_ms = elapsed.as_millis() as u64;
+    let last_ms = LAST_PRINT_MS.load(Ordering::Relaxed);
+    if done < total && now_ms.saturating_sub(last_ms) < 1000 {
+        return;
+    }
+    LAST_PRINT_MS.store(now_ms, Ordering::Relaxed);
+
+    let pct = if total > 0 { done as f64 / total as f64 } else { 0.0 };
+    const BAR_WIDTH: usize = 30;
+    let fill = ((pct * BAR_WIDTH as f64) as usize).min(BAR_WIDTH);
+    let mut bar = vec![b' '; BAR_WIDTH];
+    for b in bar[..fill].iter_mut() {
+        *b = b'=';
+    }
+    if fill < BAR_WIDTH {
+        bar[fill] = b'>';
+    }
+    let bar = std::str::from_utf8(&bar).unwrap();
+
+    let elapsed_s = elapsed.as_secs();
+    let eta = if done > 0 && done < total {
+        let eta_s = (elapsed.as_secs_f64() * (total - done) as f64 / done as f64) as u64;
+        format!(" | ETA {}", format_duration(eta_s))
+    } else {
+        String::new()
+    };
+
+    let line = format!(
+        "[{bar}] {:3.0}% | {} elapsed{eta}",
+        pct * 100.0,
+        format_duration(elapsed_s),
+    );
+    eprint!("\r{line:<79}");
+    let _ = std::io::stderr().flush();
+}
+
+fn format_duration(secs: u64) -> String {
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    if h > 0 {
+        format!("{h}h {m}m {s}s")
+    } else if m > 0 {
+        format!("{m}m {s}s")
+    } else {
+        format!("{s}s")
+    }
 }
 
 fn hms(total_seconds: f64) -> (u64, u64, f64) {
